@@ -7,7 +7,15 @@ import (
 	"strconv"
 
 	"github.com/MadhurSikko/snippetbox/internal/models"
+	"github.com/MadhurSikko/snippetbox/internal/models/validator"
 )
+
+type snippetCreateForm struct {
+	Title               string
+	Content             string
+	Expires             int
+	validator.Validator `form:"-"`
+}
 
 // GET /{$}
 func (app *application) home(w http.ResponseWriter, r *http.Request) {
@@ -47,15 +55,41 @@ func (app *application) snippetView(w http.ResponseWriter, r *http.Request) {
 
 	app.render(w, r, http.StatusOK, "views.html", data)
 }
-func (app *application) snippetCreate(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("Display a form for creating a new snippet..."))
-}
-func (app *application) snippetCreatePost(w http.ResponseWriter, r *http.Request) {
 
-	title := "0 snail"
-	content := "0 snail\nClimb Mount Fuji, \nBut Slowly, slowly!\n\n- Kobayashi Issa"
-	expires := 7
-	id, err := app.snippets.Insert(title, content, expires)
+// GET /snippet/create
+func (app *application) snippetCreate(w http.ResponseWriter, r *http.Request) {
+	data := app.newTemplateData(r)
+	data.Form = snippetCreateForm{
+		Expires: 365,
+	}
+	app.render(w, r, http.StatusOK, "create.html", data)
+}
+
+// POST /snippet/create
+func (app *application) snippetCreatePost(w http.ResponseWriter, r *http.Request) {
+	form := snippetCreateForm{}
+	err := app.decodePostForm(r, &form)
+
+	if err != nil {
+		app.clientError(w, http.StatusBadRequest)
+		return
+	}
+
+	// Validation of title, content and expires and adding it to form.FieldError
+	form.CheckField(validator.NotBlank(form.Title), "title", "This field cannot be blank")
+	form.CheckField(validator.MaxChars(form.Title, 100), "title", "This field cannot be more than 100 characters long")
+	form.CheckField(validator.NotBlank(form.Content), "content", "This field cannot be blank")
+	form.CheckField(validator.PermittedValue(form.Expires, 1, 7, 365), "expires", "This field must equal 1, 7 or 365")
+
+	if !form.Valid() {
+		data := app.newTemplateData(r)
+		data.Form = form
+		app.render(w, r, http.StatusUnprocessableEntity, "create.html", data)
+		return
+	}
+
+	// Inserting data into database, checking for any errors and redirectiong to /snippet/views page to show the newly added snippet
+	id, err := app.snippets.Insert(form.Title, form.Title, form.Expires)
 	if err != nil {
 		app.serverError(w, r, err)
 		return
