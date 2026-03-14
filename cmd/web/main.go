@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -52,6 +53,8 @@ func main() {
 	sessionManager.Store = mysqlstore.New(db)
 	sessionManager.Lifetime = 12 * time.Hour
 
+	sessionManager.Cookie.Secure = true
+
 	app := &application{
 		logger:         logger,
 		snippets:       &models.SnippetModel{DB: db},
@@ -59,16 +62,28 @@ func main() {
 		formDecoder:    formDecoder,
 		sessionManager: sessionManager,
 	}
-	// addr := flag.String("addr", ":4000", "HTTP network address")
-	// flag.Parse()
 
-	mux := app.routes()
+	tlsConfig := &tls.Config{
+		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
+	}
 
 	addr := ":" + fmt.Sprintf("%v", *port)
+
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      app.routes(),
+		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
+		TLSConfig:    tlsConfig,
+		IdleTimeout:  time.Minute,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+	}
+
 	logger.Info("Starting server", "port", addr)
-	err = http.ListenAndServe(addr, mux)
+	err = srv.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
 	logger.Error(err.Error())
 	os.Exit(1)
+
 }
 
 func openDB(dsn string) (*sql.DB, error) {
